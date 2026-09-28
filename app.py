@@ -138,3 +138,42 @@ def ingest_track(track: TrackQuery):
         if 'local_file_path' in locals() and os.path.exists(local_file_path):
             os.remove(local_file_path)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/songs")
+def get_library():
+    try:
+        _, sheets_service = get_google_services()
+        
+        # Read the entire database from your Google Sheet
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,  # Ensure SHEET_ID is defined at the top of app.py
+            range="Sheet1!A:D"
+        ).execute()
+        
+        rows = result.get('values', [])
+        
+        if not rows:
+            return {"status": "success", "data": []}
+            
+        library = []
+        for row in rows:
+            # Skip rows that might be incomplete
+            if len(row) < 4:
+                continue
+                
+            track_id, title, artist, drive_id = row
+            
+            # Convert Drive ID into a direct streaming buffer URL
+            stream_url = f"https://drive.google.com/uc?export=download&id={drive_id}"
+            
+            library.append({
+                "track_id": track_id,
+                "title": title,
+                "artist": artist,
+                "stream_url": stream_url
+            })
+            
+        return {"status": "success", "total_tracks": len(library), "data": library}
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
