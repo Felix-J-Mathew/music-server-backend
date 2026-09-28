@@ -6,6 +6,11 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
+from typing import List
+
+class PlaylistRequest(BaseModel):
+    name: str
+    track_ids: List[str]
 
 app = FastAPI(title="MusicServer Backend")
 
@@ -174,6 +179,78 @@ def get_library():
             })
             
         return {"status": "success", "total_tracks": len(library), "data": library}
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+@app.get("/playlists")
+def get_playlists():
+    try:
+        _, sheets_service = get_google_services()
+        
+        # Read from the new Playlists tab
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range="Playlists!A:B"
+        ).execute()
+        
+        rows = result.get('values', [])
+        playlists = []
+        
+        for row in rows:
+            if len(row) < 2:
+                continue
+            name = row[0]
+            # Convert the comma-separated string back into a Python list
+            track_ids = row[1].split(',') if row[1] else []
+            playlists.append({"name": name, "track_ids": track_ids})
+            
+        return {"status": "success", "data": playlists}
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/playlists")
+def save_playlist(playlist: PlaylistRequest):
+    try:
+        _, sheets_service = get_google_services()
+        
+        # 1. Fetch existing rows to find if the playlist already exists
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range="Playlists!A:B"
+        ).execute()
+        
+        rows = result.get('values', [])
+        row_index = -1
+        
+        for i, row in enumerate(rows):
+            if row and row[0] == playlist.name:
+                row_index = i + 1  # Google Sheets is 1-indexed
+                break
+        
+        # Convert the list of IDs into a single comma-separated string
+        track_string = ",".join(playlist.track_ids)
+        body = {"values": [[playlist.name, track_string]]}
+        
+        if row_index != -1:
+            # Update existing playlist row
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=SHEET_ID,
+                range=f"Playlists!A{row_index}:B{row_index}",
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+        else:
+            # Append as a new playlist
+            sheets_service.spreadsheets().values().append(
+                spreadsheetId=SHEET_ID,
+                range="Playlists!A:B",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body=body
+            ).execute()
+            
+        return {"status": "success", "message": f"Playlist '{playlist.name}' synced."}
         
     except Exception as e:
         return {"status": "error", "message": str(e)}
