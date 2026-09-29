@@ -75,75 +75,132 @@ def _delete_sheet_row(sheets_service, spreadsheet_id: str, tab_name: str, row_in
 
 
 import yt_dlp
+import base64
+import re
+
+
+def _prepare_cookie_file() -> Optional[str]:
+    """Prepare, auto-repair, and validate a Netscape format cookie file."""
+    target_path = "/tmp/render_cookies.txt"
+    env_cookies = os.getenv("YOUTUBE_COOKIES")
+    if env_cookies:
+        content = env_cookies.strip().strip('"').strip("'")
+        # Try base64 decoding first
+        try:
+            decoded = base64.b64decode(content).decode('utf-8', errors='ignore')
+            if 'youtube.com' in decoded:
+                content = decoded
+        except Exception:
+            pass
+
+        lines = content.splitlines()
+        cleaned_lines = ['# Netscape HTTP Cookie File']
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith('#'):
+                if not line.startswith('# Netscape'):
+                    cleaned_lines.append(line)
+                continue
+            # If line is space-separated instead of tab-separated, convert to tabs
+            if '\t' not in line:
+                parts = re.split(r'\s+', line)
+                if len(parts) >= 7:
+                    line = '\t'.join(parts[:7])
+            cleaned_lines.append(line)
+
+        # Only write if we have actual cookie records
+        if len(cleaned_lines) > 1:
+            final_text = '\n'.join(cleaned_lines) + '\n'
+            with open(target_path, 'w', encoding='utf-8') as f:
+                f.write(final_text)
+            return target_path
+
+    cookie_candidates = [
+        "/etc/secrets/cookies.txt",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
+        os.path.join(os.getcwd(), "cookies.txt"),
+    ]
+    for path in cookie_candidates:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            try:
+                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                    first_line = f.readline()
+                if '# Netscape' in first_line:
+                    return path
+            except Exception:
+                pass
+    return None
 
 
 # --- Core: Audio Extraction ---
 def extract_audio(query: str) -> dict:
     """Extract audio from a direct YouTube URL or search query using yt-dlp."""
-    # Check if cookies are supplied via environment variable or secret file
-    cookie_path = None
-    env_cookies = os.getenv("YOUTUBE_COOKIES")
-    if env_cookies:
-        cookie_path = "/tmp/render_cookies.txt"
-        with open(cookie_path, "w") as f:
-            f.write(env_cookies.strip())
-    else:
-        cookie_candidates = [
-            "/etc/secrets/cookies.txt",
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
-            os.path.join(os.getcwd(), "cookies.txt"),
-        ]
-        cookie_path = next((p for p in cookie_candidates if os.path.exists(p)), None)
+    cookie_path = _prepare_cookie_file()
 
-    ydl_opts = {
-        'format': 'bestaudio/best/18/b',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192'
-        }],
-        'outtmpl': '/tmp/%(id)s.%(ext)s',
-        'noplaylist': True,
-        'quiet': True,
-        'default_search': 'ytsearch1',
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android']
+    def _build_ydl_opts(use_cookies: bool = True) -> dict:
+        opts = {
+            'format': 'bestaudio/best/18/b',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192'
+            }],
+            'outtmpl': '/tmp/%(id)s.%(ext)s',
+            'noplaylist': True,
+            'quiet': True,
+            'default_search': 'ytsearch1',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android']
+                }
             }
         }
-    }
-    if cookie_path:
-        ydl_opts['cookiefile'] = cookie_path
+        if use_cookies and cookie_path and os.path.exists(cookie_path):
+            opts['cookiefile'] = cookie_path
+        return opts
+
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=True)
-            entry = info['entries'][0] if 'entries' in info and info['entries'] else info
-            track_id = entry.get('id')
-            if not track_id:
-                track_id = hashlib.sha256(query.encode()).hexdigest()[:16]
-            title = entry.get('title') or query
-            artist = entry.get('uploader') or entry.get('channel') or "Unknown Artist"
-            mp3_path = f"/tmp/{track_id}.mp3"
+        # Try download (with cookie if available; if cookie fails, retry without)
+        try:
+            with yt_dlp.YoutubeDL(_build_ydl_opts(use_cookies=True)) as ydl:
+                info = ydl.extract_info(query, download=True)
+        except Exception as e:
+            err_str = str(e).lower()
+            if cookie_path and ('cookie' in err_str or 'netscape' in err_str):
+                with yt_dlp.YoutubeDL(_build_ydl_opts(use_cookies=False)) as ydl:
+                    info = ydl.extract_info(query, download=True)
+            else:
+                raise
 
-            # Clean up intermediate files
-            for ext in ['webm', 'm4a', 'opus', 'ogg', 'wav', 'part']:
-                inter = f"/tmp/{track_id}.{ext}"
-                if os.path.exists(inter):
-                    try:
-                        os.remove(inter)
-                    except OSError:
-                        pass
+        entry = info['entries'][0] if 'entries' in info and info['entries'] else info
+        track_id = entry.get('id')
+        if not track_id:
+            track_id = hashlib.sha256(query.encode()).hexdigest()[:16]
+        title = entry.get('title') or query
+        artist = entry.get('uploader') or entry.get('channel') or "Unknown Artist"
+        mp3_path = f"/tmp/{track_id}.mp3"
 
-            if not os.path.exists(mp3_path):
-                return {"success": False, "error": f"Extracted MP3 file not found at {mp3_path}"}
+        # Clean up intermediate files
+        for ext in ['webm', 'm4a', 'opus', 'ogg', 'wav', 'part']:
+            inter = f"/tmp/{track_id}.{ext}"
+            if os.path.exists(inter):
+                try:
+                    os.remove(inter)
+                except OSError:
+                    pass
 
-            return {
-                "success": True,
-                "track_id": track_id,
-                "title": title,
-                "artist": artist,
-                "file_path": mp3_path
-            }
+        if not os.path.exists(mp3_path):
+            return {"success": False, "error": f"Extracted MP3 file not found at {mp3_path}"}
+
+        return {
+            "success": True,
+            "track_id": track_id,
+            "title": title,
+            "artist": artist,
+            "file_path": mp3_path
+        }
     except Exception as e:
         return {"success": False, "error": f"Audio extraction failed: {str(e)}"}
 
