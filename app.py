@@ -13,7 +13,7 @@ from googleapiclient.http import MediaFileUpload
 app = FastAPI(title="MusicServer Backend")
 
 # --- Authentication ---
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY") or os.getenv("API_KAEY") or os.getenv("api_key")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header)):

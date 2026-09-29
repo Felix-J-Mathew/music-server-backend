@@ -10,6 +10,15 @@ SCOPES = [
 
 def get_credentials_path():
     """Resolve the credentials file path based on the environment."""
+    candidates = [
+        "/etc/secrets/token.json",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json"),
+        os.path.join(os.getcwd(), "token.json"),
+        "token.json",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
     if os.getenv("RENDER"):
         return "/etc/secrets/token.json"
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
@@ -32,11 +41,16 @@ def get_google_services(credentials_path=None):
 
 def get_config():
     """Return Drive folder ID and Sheet ID from environment variables."""
-    drive_folder_id = os.getenv("DRIVE_FOLDER_ID")
-    sheet_id = os.getenv("SHEET_ID")
-    if not drive_folder_id or not sheet_id:
-        raise RuntimeError(
-            "Missing required environment variables: DRIVE_FOLDER_ID and SHEET_ID. "
-            "Set them before running the server."
-        )
+    drive_folder_id = (
+        os.getenv("DRIVE_FOLDER_ID")
+        or os.getenv("Drive_Folder_ID")
+        or os.getenv("drive_folder_id")
+        or "1qmk43cya5p_j64lrxf1Cppza8EVrIv-h"
+    )
+    sheet_id = (
+        os.getenv("SHEET_ID")
+        or os.getenv("Sheet_ID")
+        or os.getenv("sheet_id")
+        or "1_8NNiKRldOQLEtr8iwqUCoJUm0AgrkgoXH-xO_ptDfc"
+    )
     return drive_folder_id, sheet_id
