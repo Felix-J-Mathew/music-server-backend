@@ -80,15 +80,23 @@ import yt_dlp
 # --- Core: Audio Extraction ---
 def extract_audio(query: str) -> dict:
     """Extract audio from a direct YouTube URL or search query using yt-dlp."""
-    cookie_candidates = [
-        "/etc/secrets/cookies.txt",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
-        os.path.join(os.getcwd(), "cookies.txt"),
-    ]
-    cookie_path = next((p for p in cookie_candidates if os.path.exists(p)), None)
+    # Check if cookies are supplied via environment variable or secret file
+    cookie_path = None
+    env_cookies = os.getenv("YOUTUBE_COOKIES")
+    if env_cookies:
+        cookie_path = "/tmp/render_cookies.txt"
+        with open(cookie_path, "w") as f:
+            f.write(env_cookies.strip())
+    else:
+        cookie_candidates = [
+            "/etc/secrets/cookies.txt",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
+            os.path.join(os.getcwd(), "cookies.txt"),
+        ]
+        cookie_path = next((p for p in cookie_candidates if os.path.exists(p)), None)
 
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio/best/18/b',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -100,7 +108,7 @@ def extract_audio(query: str) -> dict:
         'default_search': 'ytsearch1',
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'tv', 'web']
+                'player_client': ['android']
             }
         }
     }
