@@ -47,18 +47,18 @@ class TrackQuery(BaseModel):
 
 def extract_audio(query: str) -> dict:
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'cookiefile': 'cookies.txt',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'outtmpl': '/tmp/%(id)s.%(ext)s',
-        'noplaylist': True,
-        'quiet': True,
-        'default_search': 'ytsearch1'
-    }
+    'format': 'bestaudio[ext=m4a]/bestaudio/best',  # <-- Fallback format string
+    'cookiefile': 'cookies.txt',
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
+    'outtmpl': '/tmp/%(id)s.%(ext)s',
+    'noplaylist': True,
+    'quiet': True,
+    'default_search': 'ytsearch1'
+}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
