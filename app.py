@@ -197,11 +197,17 @@ def get_playlists():
         playlists = []
         
         for row in rows:
-            if len(row) < 2:
+            # Only skip if the row is entirely empty (no name)
+            if len(row) < 1:
                 continue
+                
             name = row[0]
+            
+            # Safely grab the track IDs if the second column exists, otherwise default to empty string
+            track_string = row[1] if len(row) > 1 else ""
+            
             # Convert the comma-separated string back into a Python list
-            track_ids = row[1].split(',') if row[1] else []
+            track_ids = track_string.split(',') if track_string else []
             playlists.append({"name": name, "track_ids": track_ids})
             
         return {"status": "success", "data": playlists}
