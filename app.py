@@ -12,6 +12,13 @@ class PlaylistRequest(BaseModel):
     name: str
     track_ids: List[str]
 
+class RemoveTrackRequest(BaseModel):
+    playlist_name: str
+    track_id: str
+
+class DeletePlaylistRequest(BaseModel):
+    playlist_name: str
+
 app = FastAPI(title="MusicServer Backend")
 
 if os.getenv("RENDER"):
@@ -19,15 +26,11 @@ if os.getenv("RENDER"):
 else:
     CREDENTIALS_PATH = "token.json"
 
-# Define Google Drive folder ID/Google Sheets ID
-DRIVE_FOLDER_ID = "1qmk43cya5p_j64lrxf1Cppza8EVrIv-h" 
-SHEET_ID = "1_8NNiKRldOQLEtr8iwqUCoJUm0AgrkgoXH-xO_ptDfc"
-
-
-CREDENTIALS_PATH = "token.json" 
+# Strict security: No fallbacks. Must be provided via environment variables.
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
+SHEET_ID = os.getenv("SHEET_ID")
 
 def get_google_services():
-    
     scopes = [
         'https://www.googleapis.com/auth/drive.file',
         'https://www.googleapis.com/auth/spreadsheets'
@@ -43,7 +46,6 @@ class TrackQuery(BaseModel):
     query: str
 
 def extract_audio(query: str) -> dict:
-# Finds the song,downloads the song.
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -80,22 +82,13 @@ def extract_audio(query: str) -> dict:
 
 @app.get("/health")
 def health_check():
-
-   # The Wake Ping: Flutter hits this every 10 seconds.
-
     return {"status": "awake", "message": "Extraction server ready"}
 
 @app.post("/ingest")
 def ingest_track(track: TrackQuery):
-  
-    #The Ingest Execution: Receives the search query, extracts audio, uploads to Drive, and logs to Sheets.
-
     query = track.query
-    
     try:
-        # yt-dlp extraction
         extraction_result = extract_audio(query)
-        
         if not extraction_result.get("success"):
             raise HTTPException(status_code=500, detail=extraction_result.get("error"))
             
@@ -104,10 +97,8 @@ def ingest_track(track: TrackQuery):
         artist = extraction_result["artist"]
         track_id = extraction_result["track_id"]
         
-        # Google APIs Integration
         drive_service, sheets_service = get_google_services()
         
-        # Upload to Google Drive
         file_metadata = {
             'name': f"{title}.mp3",
             'parents': [DRIVE_FOLDER_ID]
@@ -121,7 +112,6 @@ def ingest_track(track: TrackQuery):
         
         drive_file_id = drive_file.get('id')
         
-        # Append to Google Sheets
         row_data = [[track_id, title, artist, drive_file_id]]
         sheets_service.spreadsheets().values().append(
             spreadsheetId=SHEET_ID,
@@ -130,7 +120,6 @@ def ingest_track(track: TrackQuery):
             body={"values": row_data}
         ).execute()
         
-        # Clean up local storage
         if os.path.exists(local_file_path):
             os.remove(local_file_path)
         
@@ -148,29 +137,21 @@ def ingest_track(track: TrackQuery):
 def get_library():
     try:
         _, sheets_service = get_google_services()
-        
-        # Read the entire database from your Google Sheet
         result = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID,  # Ensure SHEET_ID is defined at the top of app.py
+            spreadsheetId=SHEET_ID,
             range="Sheet1!A:D"
         ).execute()
         
         rows = result.get('values', [])
-        
         if not rows:
             return {"status": "success", "data": []}
             
         library = []
         for row in rows:
-            # Skip rows that might be incomplete
             if len(row) < 4:
                 continue
-                
             track_id, title, artist, drive_id = row
-            
-            # Convert Drive ID into a direct streaming buffer URL
             stream_url = f"https://drive.google.com/uc?export=download&id={drive_id}"
-            
             library.append({
                 "track_id": track_id,
                 "title": title,
@@ -179,15 +160,41 @@ def get_library():
             })
             
         return {"status": "success", "total_tracks": len(library), "data": library}
-        
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.delete("/songs/{track_id}")
+def delete_song(track_id: str):
+    try:
+        _, sheets_service = get_google_services()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range="Sheet1!A:D"
+        ).execute()
+        rows = result.get('values', [])
+        
+        row_index = -1
+        for i, row in enumerate(rows):
+            if row and row[0] == track_id:
+                row_index = i + 1
+                break
+                
+        if row_index == -1:
+            raise HTTPException(status_code=404, detail="Song not found")
+            
+        sheets_service.spreadsheets().values().clear(
+            spreadsheetId=SHEET_ID,
+            range=f"Sheet1!A{row_index}:D{row_index}"
+        ).execute()
+        
+        return {"status": "success", "message": "Song deleted from library"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/playlists")
 def get_playlists():
     try:
         _, sheets_service = get_google_services()
-        
-        # Read from the new Playlists tab
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=SHEET_ID,
             range="Playlists!A:B"
@@ -197,21 +204,14 @@ def get_playlists():
         playlists = []
         
         for row in rows:
-            # Only skip if the row is entirely empty (no name)
             if len(row) < 1:
                 continue
-                
             name = row[0]
-            
-            # Safely grab the track IDs if the second column exists, otherwise default to empty string
             track_string = row[1] if len(row) > 1 else ""
-            
-            # Convert the comma-separated string back into a Python list
             track_ids = track_string.split(',') if track_string else []
             playlists.append({"name": name, "track_ids": track_ids})
             
         return {"status": "success", "data": playlists}
-        
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -219,8 +219,6 @@ def get_playlists():
 def save_playlist(playlist: PlaylistRequest):
     try:
         _, sheets_service = get_google_services()
-        
-        # 1. Fetch existing rows to find if the playlist already exists
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=SHEET_ID,
             range="Playlists!A:B"
@@ -231,15 +229,13 @@ def save_playlist(playlist: PlaylistRequest):
         
         for i, row in enumerate(rows):
             if row and row[0] == playlist.name:
-                row_index = i + 1  # Google Sheets is 1-indexed
+                row_index = i + 1
                 break
         
-        # Convert the list of IDs into a single comma-separated string
         track_string = ",".join(playlist.track_ids)
         body = {"values": [[playlist.name, track_string]]}
         
         if row_index != -1:
-            # Update existing playlist row
             sheets_service.spreadsheets().values().update(
                 spreadsheetId=SHEET_ID,
                 range=f"Playlists!A{row_index}:B{row_index}",
@@ -247,7 +243,6 @@ def save_playlist(playlist: PlaylistRequest):
                 body=body
             ).execute()
         else:
-            # Append as a new playlist
             sheets_service.spreadsheets().values().append(
                 spreadsheetId=SHEET_ID,
                 range="Playlists!A:B",
@@ -257,6 +252,71 @@ def save_playlist(playlist: PlaylistRequest):
             ).execute()
             
         return {"status": "success", "message": f"Playlist '{playlist.name}' synced."}
-        
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.post("/playlists/remove")
+def remove_track_from_playlist(req: RemoveTrackRequest):
+    try:
+        _, sheets_service = get_google_services()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range="Playlists!A:B"
+        ).execute()
+        rows = result.get('values', [])
+        
+        row_index = -1
+        track_ids = []
+        for i, row in enumerate(rows):
+            if row and row[0] == req.playlist_name:
+                row_index = i + 1
+                track_ids = row[1].split(',') if len(row) > 1 and row[1] else []
+                break
+                
+        if row_index == -1:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+            
+        if req.track_id in track_ids:
+            track_ids.remove(req.track_id)
+            
+        track_string = ",".join(track_ids)
+        body = {"values": [[req.playlist_name, track_string]]}
+        
+        sheets_service.spreadsheets().values().update(
+            spreadsheetId=SHEET_ID,
+            range=f"Playlists!A{row_index}:B{row_index}",
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+        
+        return {"status": "success", "message": "Track removed from playlist"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/playlists/{playlist_name}")
+def delete_playlist(playlist_name: str):
+    try:
+        _, sheets_service = get_google_services()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range="Playlists!A:B"
+        ).execute()
+        rows = result.get('values', [])
+        
+        row_index = -1
+        for i, row in enumerate(rows):
+            if row and row[0] == playlist_name:
+                row_index = i + 1
+                break
+                
+        if row_index == -1:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+            
+        sheets_service.spreadsheets().values().clear(
+            spreadsheetId=SHEET_ID,
+            range=f"Playlists!A{row_index}:B{row_index}"
+        ).execute()
+        
+        return {"status": "success", "message": "Playlist deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
