@@ -141,7 +141,7 @@ def extract_audio(query: str) -> dict:
 
     def _build_ydl_opts(use_cookies: bool = True) -> dict:
         opts = {
-            'format': 'bestaudio/best/18/b',
+            'format': 'best/bestaudio/ba/18',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -162,13 +162,12 @@ def extract_audio(query: str) -> dict:
         return opts
 
     try:
-        # Try download (with cookie if available; if cookie fails, retry without)
+        # Try download (with cookie if available; if cookie causes ANY error, retry without)
         try:
             with yt_dlp.YoutubeDL(_build_ydl_opts(use_cookies=True)) as ydl:
                 info = ydl.extract_info(query, download=True)
         except Exception as e:
-            err_str = str(e).lower()
-            if cookie_path and ('cookie' in err_str or 'netscape' in err_str):
+            if cookie_path:
                 with yt_dlp.YoutubeDL(_build_ydl_opts(use_cookies=False)) as ydl:
                     info = ydl.extract_info(query, download=True)
             else:
