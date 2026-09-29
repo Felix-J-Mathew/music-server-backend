@@ -1,5 +1,7 @@
 import os
+import re
 import hashlib
+import mimetypes
 import requests
 from fastapi import FastAPI, HTTPException, Depends, Security, UploadFile, File, Form
 from fastapi.security import APIKeyHeader
@@ -275,7 +277,16 @@ async def upload_track(
     if not track_id:
         track_id = hashlib.sha256(f"{title}_{artist}".encode()).hexdigest()[:16]
 
-    local_file_path = f"/tmp/{track_id}.mp3"
+    orig_ext = os.path.splitext(file.filename or "")[1].lower()
+    ext = orig_ext if orig_ext in [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".webm", ".wav"] else ".mp3"
+    mimetype = file.content_type or (
+        "audio/mp4" if ext == ".m4a" else
+        "audio/webm" if ext == ".webm" else
+        "audio/ogg" if ext in [".ogg", ".opus"] else
+        "audio/mpeg"
+    )
+
+    local_file_path = f"/tmp/{track_id}{ext}"
     try:
         with open(local_file_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):
@@ -284,11 +295,12 @@ async def upload_track(
         drive_service, sheets_service = get_google_services()
         drive_folder_id, sheet_id = get_config()
 
+        clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Track"
         file_metadata = {
-            'name': f"{title}.mp3",
+            'name': f"{clean_title}{ext}",
             'parents': [drive_folder_id]
         }
-        media = MediaFileUpload(local_file_path, mimetype='audio/mpeg', resumable=True)
+        media = MediaFileUpload(local_file_path, mimetype=mimetype, resumable=True)
         drive_file = drive_service.files().create(
             body=file_metadata,
             media_body=media,
