@@ -36,6 +36,15 @@ class TrackQuery(BaseModel):
 class PlaylistRequest(BaseModel):
     name: str
     track_ids: List[str]
+    cover_url: Optional[str] = None
+
+class RenamePlaylistRequest(BaseModel):
+    old_name: str
+    new_name: str
+
+class PlaylistCoverRequest(BaseModel):
+    playlist_name: str
+    cover_url: str
 
 class RemoveTrackRequest(BaseModel):
     playlist_name: str
@@ -413,7 +422,7 @@ def get_playlists(_key: str = Depends(verify_api_key)):
         _, sheet_id = get_config()
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range="Playlists!A:B"
+            range="Playlists!A:C"
         ).execute()
 
         rows = result.get('values', [])
@@ -424,8 +433,9 @@ def get_playlists(_key: str = Depends(verify_api_key)):
                 continue
             name = row[0]
             track_string = row[1] if len(row) > 1 else ""
+            cover_url = row[2] if len(row) > 2 else ""
             track_ids = [tid for tid in track_string.split(',') if tid] if track_string else []
-            playlists.append({"name": name, "track_ids": track_ids})
+            playlists.append({"name": name, "track_ids": track_ids, "cover_url": cover_url})
 
         return {"status": "success", "data": playlists}
     except Exception as e:
@@ -439,37 +449,103 @@ def save_playlist(playlist: PlaylistRequest, _key: str = Depends(verify_api_key)
         _, sheet_id = get_config()
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range="Playlists!A:B"
+            range="Playlists!A:C"
         ).execute()
 
         rows = result.get('values', [])
         row_index = -1
+        existing_cover = ""
 
         for i, row in enumerate(rows):
             if row and row[0] == playlist.name:
                 row_index = i + 1
+                if len(row) > 2:
+                    existing_cover = row[2]
                 break
 
         track_string = ",".join(playlist.track_ids)
-        body = {"values": [[playlist.name, track_string]]}
+        cover_val = playlist.cover_url if playlist.cover_url is not None else existing_cover
+        body = {"values": [[playlist.name, track_string, cover_val]]}
 
         if row_index != -1:
             sheets_service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
-                range=f"Playlists!A{row_index}:B{row_index}",
+                range=f"Playlists!A{row_index}:C{row_index}",
                 valueInputOption="RAW",
                 body=body
             ).execute()
         else:
             sheets_service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
-                range="Playlists!A:B",
+                range="Playlists!A:C",
                 valueInputOption="RAW",
                 insertDataOption="INSERT_ROWS",
                 body=body
             ).execute()
 
         return {"status": "success", "message": f"Playlist '{playlist.name}' synced."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/playlists/rename")
+def rename_playlist(req: RenamePlaylistRequest, _key: str = Depends(verify_api_key)):
+    try:
+        _, sheets_service = get_google_services()
+        _, sheet_id = get_config()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range="Playlists!A:C"
+        ).execute()
+        rows = result.get('values', [])
+        row_index = -1
+        for i, row in enumerate(rows):
+            if row and row[0] == req.old_name:
+                row_index = i + 1
+                break
+        if row_index == -1:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+        sheets_service.spreadsheets().values().update(
+            spreadsheetId=sheet_id,
+            range=f"Playlists!A{row_index}",
+            valueInputOption="RAW",
+            body={"values": [[req.new_name]]}
+        ).execute()
+        return {"status": "success", "message": f"Playlist renamed to '{req.new_name}'"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/playlists/cover")
+def set_playlist_cover(req: PlaylistCoverRequest, _key: str = Depends(verify_api_key)):
+    try:
+        _, sheets_service = get_google_services()
+        _, sheet_id = get_config()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range="Playlists!A:C"
+        ).execute()
+        rows = result.get('values', [])
+        row_index = -1
+        for i, row in enumerate(rows):
+            if row and row[0] == req.playlist_name:
+                row_index = i + 1
+                break
+        if row_index == -1:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+        sheets_service.spreadsheets().values().update(
+            spreadsheetId=sheet_id,
+            range=f"Playlists!C{row_index}",
+            valueInputOption="RAW",
+            body={"values": [[req.cover_url]]}
+        ).execute()
+        return {"status": "success", "message": f"Playlist cover updated for '{req.playlist_name}'"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
