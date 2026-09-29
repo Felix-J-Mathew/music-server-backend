@@ -2,6 +2,11 @@ FROM python:3.10.14-slim-bookworm
 
 WORKDIR /app
 
+# Install FFmpeg for audio transcoding
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies first (better layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

@@ -74,103 +74,56 @@ def _delete_sheet_row(sheets_service, spreadsheet_id: str, tab_name: str, row_in
     ).execute()
 
 
+import yt_dlp
+
+
 # --- Core: Audio Extraction ---
 def extract_audio(query: str) -> dict:
-    """Extract audio from a URL or search query via the Cobalt API."""
-    wrapper_api_url = "https://api.cobalt.tools/api/json"
-
-    # Cobalt only accepts direct video URLs, not search pages.
-    if not query.startswith(("http://", "https://")):
-        return {
-            "success": False,
-            "error": (
-                "Please provide a direct YouTube URL. "
-                "Search-by-keyword is not supported by the extraction backend."
-            )
-        }
-
-    payload = {
-        "url": query,
-        "audioFormat": "mp3",
-        "isAudioOnly": True
+    """Extract audio from a direct YouTube URL or search query using yt-dlp."""
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192'
+        }],
+        'outtmpl': '/tmp/%(id)s.%(ext)s',
+        'noplaylist': True,
+        'quiet': True,
+        'default_search': 'ytsearch1'
     }
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }
-
-    temp_file_path = None
-
     try:
-        response = requests.post(
-            wrapper_api_url,
-            json=payload,
-            headers=headers,
-            timeout=30
-        )
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=True)
+            entry = info['entries'][0] if 'entries' in info and info['entries'] else info
+            track_id = entry.get('id')
+            if not track_id:
+                track_id = hashlib.sha256(query.encode()).hexdigest()[:16]
+            title = entry.get('title') or query
+            artist = entry.get('uploader') or entry.get('channel') or "Unknown Artist"
+            mp3_path = f"/tmp/{track_id}.mp3"
 
-        try:
-            res_data = response.json()
-        except ValueError:
+            # Clean up intermediate files
+            for ext in ['webm', 'm4a', 'opus', 'ogg', 'wav', 'part']:
+                inter = f"/tmp/{track_id}.{ext}"
+                if os.path.exists(inter):
+                    try:
+                        os.remove(inter)
+                    except OSError:
+                        pass
+
+            if not os.path.exists(mp3_path):
+                return {"success": False, "error": f"Extracted MP3 file not found at {mp3_path}"}
+
             return {
-                "success": False,
-                "error": f"Cobalt returned non-JSON response (HTTP {response.status_code})"
+                "success": True,
+                "track_id": track_id,
+                "title": title,
+                "artist": artist,
+                "file_path": mp3_path
             }
-
-        if response.status_code != 200:
-            return {
-                "success": False,
-                "error": f"Cobalt extraction failed (HTTP {response.status_code}): {res_data}"
-            }
-
-        audio_download_url = res_data.get("url")
-
-        if not audio_download_url and res_data.get("tunnel"):
-            tunnel = res_data["tunnel"]
-            audio_download_url = tunnel[0] if isinstance(tunnel, list) else tunnel
-
-        if not audio_download_url:
-            return {
-                "success": False,
-                "error": f"Cobalt did not return a downloadable audio URL: {res_data}"
-            }
-
-        # Deterministic track ID using SHA-256 (stable across restarts)
-        track_id = (
-            str(res_data.get("id"))
-            if res_data.get("id")
-            else hashlib.sha256(query.encode()).hexdigest()[:16]
-        )
-
-        title = res_data.get("title") or query
-        artist = res_data.get("artist") or res_data.get("uploader") or "Unknown Artist"
-
-        temp_file_path = f"/tmp/{track_id}.mp3"
-
-        # Stream audio download to avoid OOM on large files
-        with requests.get(audio_download_url, stream=True, timeout=120) as audio_res:
-            audio_res.raise_for_status()
-            with open(temp_file_path, "wb") as f:
-                for chunk in audio_res.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-        return {
-            "success": True,
-            "track_id": track_id,
-            "title": title,
-            "artist": artist,
-            "file_path": temp_file_path
-        }
-
-    except requests.RequestException as e:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-        return {"success": False, "error": f"Media download request failed: {str(e)}"}
-
     except Exception as e:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"Audio extraction failed: {str(e)}"}
 
 
 # --- Routes ---
