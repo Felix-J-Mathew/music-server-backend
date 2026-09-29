@@ -1,7 +1,7 @@
 import os
 import hashlib
 import requests
-from fastapi import FastAPI, HTTPException, Depends, Security
+from fastapi import FastAPI, HTTPException, Depends, Security, UploadFile, File, Form
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import List, Optional
@@ -261,6 +261,66 @@ def ingest_track(track: TrackQuery, _key: str = Depends(verify_api_key)):
     finally:
         if local_file_path and os.path.exists(local_file_path):
             os.remove(local_file_path)
+
+
+@app.post("/upload")
+async def upload_track(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    artist: str = Form("Unknown Artist"),
+    track_id: Optional[str] = Form(None),
+    _key: str = Depends(verify_api_key)
+):
+    """Client-assisted ingestion endpoint: accepts direct audio upload from Flutter client."""
+    if not track_id:
+        track_id = hashlib.sha256(f"{title}_{artist}".encode()).hexdigest()[:16]
+
+    local_file_path = f"/tmp/{track_id}.mp3"
+    try:
+        with open(local_file_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                f.write(chunk)
+
+        drive_service, sheets_service = get_google_services()
+        drive_folder_id, sheet_id = get_config()
+
+        file_metadata = {
+            'name': f"{title}.mp3",
+            'parents': [drive_folder_id]
+        }
+        media = MediaFileUpload(local_file_path, mimetype='audio/mpeg', resumable=True)
+        drive_file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+
+        drive_file_id = drive_file.get('id')
+
+        row_data = [[track_id, title, artist, drive_file_id]]
+        sheets_service.spreadsheets().values().append(
+            spreadsheetId=sheet_id,
+            range="Sheet1!A:D",
+            valueInputOption="USER_ENTERED",
+            body={"values": row_data}
+        ).execute()
+
+        return {
+            "status": "success",
+            "message": f"Successfully uploaded '{title}'",
+            "drive_file_id": drive_file_id,
+            "track_id": track_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(local_file_path):
+            try:
+                os.remove(local_file_path)
+            except OSError:
+                pass
 
 
 @app.get("/songs")
