@@ -14,12 +14,16 @@ app = FastAPI(title="MusicServer Backend")
 
 # --- Authentication ---
 API_KEY = os.getenv("API_KEY") or os.getenv("API_KAEY") or os.getenv("api_key")
+if API_KEY:
+    API_KEY = API_KEY.strip().strip('"').strip("'")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header)):
     """Verify the API key if one is configured on the server."""
-    if API_KEY and api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    if API_KEY:
+        cleaned_incoming = (api_key or "").strip().strip('"').strip("'")
+        if cleaned_incoming != API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
 
