@@ -48,6 +48,7 @@ class TrackQuery(BaseModel):
 def extract_audio(query: str) -> dict:
     ydl_opts = {
         'format': 'bestaudio/best',
+        'cookiefile': 'cookies.txt',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
