@@ -1,8 +1,35 @@
+# Secrets & credentials
 token.json
 client_secret.json
+cookies.txt
+*.pem
+*.key
+.env
+.env.*
+service_account.json
+
+# Python
 __pycache__/
-songs.txt
-bulk.py
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
 venv/
 .venv/
 env/
+
+# Local tools
+songs.txt
+bulk.py
+
+# Flutter frontend
+blue_fox_music
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+*.mp3

@@ -1,7 +1,7 @@
-fastapi
-uvicorn
-pydantic
-yt-dlp>=2024.3.10
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+fastapi~=0.115.0
+uvicorn[standard]~=0.32.0
+pydantic~=2.9.0
+requests~=2.32.0
+google-api-python-client~=2.149.0
+google-auth-httplib2~=0.2.0
+google-auth-oauthlib~=1.2.0
