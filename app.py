@@ -221,6 +221,7 @@ from fastapi.responses import StreamingResponse
 import requests
 
 from google.auth.transport.requests import Request as AuthRequest
+from fastapi.responses import RedirectResponse
 
 @app.get("/stream/{drive_id}")
 def stream_song(drive_id: str):
@@ -229,11 +230,10 @@ def stream_song(drive_id: str):
     if creds.expired or not creds.valid or not creds.token:
         creds.refresh(AuthRequest())
     
-    headers = {"Authorization": f"Bearer {creds.token}"}
-    url = f"https://www.googleapis.com/drive/v3/files/{drive_id}?alt=media"
-    
-    r = requests.get(url, headers=headers, stream=True)
-    return StreamingResponse(r.iter_content(chunk_size=1024*1024), media_type=r.headers.get("Content-Type", "audio/mpeg"))
+    # Redirect directly to Google Drive API with the access token
+    # This allows the client audio player to handle Range Requests natively!
+    url = f"https://www.googleapis.com/drive/v3/files/{drive_id}?alt=media&access_token={creds.token}"
+    return RedirectResponse(url=url, status_code=302)
 
 
 @app.get("/health")
