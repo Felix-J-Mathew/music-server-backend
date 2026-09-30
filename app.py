@@ -220,15 +220,18 @@ def extract_audio(query: str) -> dict:
 from fastapi.responses import StreamingResponse
 import requests
 
+from google.auth.transport.requests import Request as AuthRequest
+
 @app.get("/stream/{drive_id}")
 def stream_song(drive_id: str):
     drive_service, _ = get_google_services()
+    creds = drive_service._http.credentials
+    if creds.expired or not creds.valid or not creds.token:
+        creds.refresh(AuthRequest())
     
-    # We must stream it directly from the request URI with the auth headers
-    headers = {"Authorization": f"Bearer {drive_service._http.credentials.token}"}
+    headers = {"Authorization": f"Bearer {creds.token}"}
     url = f"https://www.googleapis.com/drive/v3/files/{drive_id}?alt=media"
     
-    # Use requests to stream from Google Drive
     r = requests.get(url, headers=headers, stream=True)
     return StreamingResponse(r.iter_content(chunk_size=1024*1024), media_type=r.headers.get("Content-Type", "audio/mpeg"))
 
