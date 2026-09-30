@@ -220,22 +220,9 @@ def extract_audio(query: str) -> dict:
 from fastapi.responses import StreamingResponse
 import requests
 
-@app.get("/stream/{track_id}")
-def stream_song(track_id: str):
-    # Find drive id
-    drive_id = None
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if row and row[0] == track_id:
-                drive_id = row[3]
-                break
-    
-    if not drive_id:
-        raise HTTPException(status_code=404, detail="Track not found")
-        
+@app.get("/stream/{drive_id}")
+def stream_song(drive_id: str):
     drive_service, _ = get_google_services()
-    request = drive_service.files().get_media(fileId=drive_id)
     
     # We must stream it directly from the request URI with the auth headers
     headers = {"Authorization": f"Bearer {drive_service._http.credentials.token}"}
@@ -392,7 +379,7 @@ def get_library(_key: str = Depends(verify_api_key)):
             if len(row) < 4:
                 continue
             track_id, title, artist, drive_id = row[:4]
-            stream_url = f"https://music-server-backend.onrender.com/stream/{track_id}"
+            stream_url = f"https://music-server-backend.onrender.com/stream/{drive_id}"
             library.append({
                 "track_id": track_id,
                 "title": title,
